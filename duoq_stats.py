@@ -8,13 +8,15 @@ from tqdm import tqdm
 import requests
 from collections import Counter
 import pdb
+import time
 
 # Get new api key from https://developer.riotgames.com/
 with open('apikey.txt') as infile:
     API_KEY = infile.read().strip()
 
 USERNAME = 'muakasan'
-TARGET_CHAMPION = None # "fiddlesticks"
+TARGET_CHAMPION = None
+# TARGET_CHAMPION = "fiddlesticks"
 
 # Start of the ranked season
 DAY = 10
@@ -24,6 +26,7 @@ YEAR = 2023
 # Number of possible duoqueue "partners" to print
 NUM_PARTICIPANTS = 10
 COUNT = 20
+MAX_RETRIES = 5
 
 # https://static.developer.riotgames.com/docs/lol/queues.json
 QUEUE_ID = 420 # 420 for ranked
@@ -62,6 +65,25 @@ def get_matches(puuid):
         matches.extend(new_matches)
     return matches
 
+def fetch_match_info(match_id):
+    for i in range(MAX_RETRIES):
+        if i != 0:
+            print('retrying')
+        r = requests.get(
+        f'https://americas.api.riotgames.com/lol/match/v5/matches/{match_id}',
+        params={
+            'api_key': API_KEY,
+        })
+        
+        j = r.json()
+        if 'info' not in j:
+            print(j['status']['message'])
+            time.sleep(5)
+            continue
+        info = j['info']
+        return info
+    print('Failed retries')
+
 # Goes through fetched matches and updates dictionary mapping teammates to win loss counts
 def aggregate_winlosses(my_puuid, matches):
     teammates_count = Counter()
@@ -69,18 +91,7 @@ def aggregate_winlosses(my_puuid, matches):
 
     num_matches = 0
     for m_id in tqdm(matches):
-        r = requests.get(
-        f'https://americas.api.riotgames.com/lol/match/v5/matches/{m_id}',
-        params={
-            'api_key': API_KEY,
-        })
-        
-        j = r.json()
-        if 'info' not in j:
-            print(j)
-            print('API Error?')
-            continue
-        info = j['info']
+        info = fetch_match_info(m_id)
 
         # Ignores games which are shorter than 10 minutes
         # TODO: handle this? "Prior to patch 11.20, this field returns the game length in milliseconds calculated from gameEndTimestamp - gameStartTimestamp. Post patch 11.20, this field returns the max timePlayed of any participant in the game in seconds, which makes the behavior of this field consistent with that of match-v4. The best way to handling the change in this field is to treat the value as milliseconds if the gameEndTimestamp field isn't in the response and to treat the value as seconds if gameEndTimestamp is in the response."
@@ -88,7 +99,7 @@ def aggregate_winlosses(my_puuid, matches):
             continue
         num_matches += 1
         # gameCreation # unix timestamp
-        participants = j['info']['participants']
+        participants = info['participants']
         
         # Groups players by winning and losing team
         teams = {
@@ -167,3 +178,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+    
